@@ -1,0 +1,34 @@
+{
+  "name": "上海迪士尼 2026 · 11/24–11/28",
+  "short_name": "上海迪士尼",
+  "description": "四人共用的上海迪士尼行程規劃表：每日行程、飯店機票比價、待確認事項，離線也看得到。",
+  "lang": "zh-Hant-TW",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D2B2C",
+  "theme_color": "#0D2B2C",
+  "categories": ["travel", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
