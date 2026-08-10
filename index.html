@@ -182,6 +182,18 @@ a{color:inherit}
   color:rgba(217,183,92,.8);
 }
 /* 抽屜裡的頭像／顏色選擇器 */
+.warn{
+  margin:0 0 14px;padding:12px 14px;border-radius:var(--r);
+  background:rgba(196,61,46,.08);border:1px solid rgba(196,61,46,.28);
+  font-size:13px;line-height:1.6;color:var(--ink);
+}
+.warn button{
+  display:inline-block;margin-left:6px;
+  background:var(--lacquer);color:var(--paper-2);
+  border:none;border-radius:999px;padding:5px 13px;
+  font:inherit;font-size:12px;cursor:pointer;
+}
+.warn button:hover{background:#a83326}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{
   width:42px;height:42px;border-radius:50%;
@@ -556,6 +568,7 @@ section.on{display:block}
       <div class="sechead" style="margin-top:18px">
         <div><h2 id="dayTitle">—</h2><p id="dayMeta">&nbsp;</p></div>
       </div>
+      <div class="warn" id="strayWarn" style="display:none"></div>
       <div id="dayList"></div>
       <button class="addrow" data-add="days">＋ 加一個行程</button>
     </section>
@@ -649,6 +662,28 @@ function esc(v){
 }
 function n(v){ var x = parseFloat(String(v).replace(/[^\d.\-]/g,'')); return isNaN(x) ? 0 : x; }
 function money(v){ return n(v) ? n(v).toLocaleString('en-US') : '—'; }
+/* 把各種可能的日期寫法統一成 YYYY-MM-DD。
+   試算表有時會回 ISO 時間字串、有時是 2026/11/27，都要能對上 */
+function normDate(v){
+  if (v == null) return '';
+  if (v instanceof Date && !isNaN(v)){
+    return v.getFullYear() + '-' +
+      String(v.getMonth() + 1).padStart(2,'0') + '-' +
+      String(v.getDate()).padStart(2,'0');
+  }
+  var s = String(v).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{4})[-\/年.](\d{1,2})[-\/月.](\d{1,2})/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+  var d = new Date(s);
+  if (!isNaN(d)){
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2,'0') + '-' +
+      String(d.getDate()).padStart(2,'0');
+  }
+  return s.slice(0,10);
+}
+
 function dateLabel(iso){
   var p = String(iso).split('-');
   if (p.length < 3) return iso;
@@ -824,6 +859,7 @@ function flushQueue(){
 /* 本機先套用，畫面立刻反應，再送出 */
 function saveRow(sheet, row){
   if (!row.id) row.id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
+  if (sheet === 'days' && row.date) row.date = normDate(row.date);
   row.updatedBy = ME ? ME.name : '';
   row.updatedAt = new Date().toISOString().slice(0,19);
   var list = DATA[sheet] || (DATA[sheet] = []);
@@ -950,13 +986,30 @@ function renderDays(){
   $('#dayTitle').textContent = dateLabel(activeDay);
 
   var rows = (DATA.days || [])
-    .filter(function(r){ return String(r.date).slice(0,10) === activeDay; })
+    .filter(function(r){ return normDate(r.date) === activeDay; })
     .sort(function(a,b){ return n(a.sort) - n(b.sort); });
+
+  // 有資料但日期不在這趟行程裡的（例如改了旅遊日期，舊資料還留著）
+  var strays = (DATA.days || []).filter(function(r){
+    return TRIP_DAYS.indexOf(normDate(r.date)) === -1;
+  });
 
   var doneCount = rows.filter(function(r){ return String(r.done) === 'true' || r.done === true; }).length;
   $('#dayMeta').textContent = rows.length
     ? (rows.length + ' 個行程・已完成 ' + doneCount)
     : '這天還沒排';
+
+  var warn = $('#strayWarn');
+  if (strays.length){
+    var dates = strays.map(function(r){ return normDate(r.date) || '(空白)'; })
+      .filter(function(v,i,a){ return a.indexOf(v) === i; });
+    warn.innerHTML = '⚠️ 有 <b>' + strays.length + '</b> 筆行程的日期不在這趟裡（' +
+      esc(dates.join('、')) + '），所以看不到。' +
+      '<button type="button" id="fixStray">全部搬到 ' + esc(dateLabel(activeDay)) + '</button>';
+    warn.style.display = '';
+  } else {
+    warn.style.display = 'none';
+  }
 
   $('#dayList').innerHTML = rows.length ? rows.map(function(r){
     var done = String(r.done) === 'true' || r.done === true;
@@ -1129,9 +1182,10 @@ function openDrawer(sheet, id){
     if (type === 'textarea'){
       ctl = '<textarea data-k="' + key + '">' + esc(v) + '</textarea>';
     } else if (type === 'select'){
+      var cur = (key === 'date') ? normDate(v) : String(v);
       ctl = '<select data-k="' + key + '">' + opts.map(function(o){
         var lbl = (key === 'date') ? dateLabel(o) : o;
-        return '<option value="' + esc(o) + '"' + (String(v) === String(o) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+        return '<option value="' + esc(o) + '"' + (cur === String(o) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
       }).join('') + '</select>';
     } else {
       ctl = '<input type="' + type + '" data-k="' + key + '" value="' + esc(v) + '">';
@@ -1216,6 +1270,18 @@ $('#dayFan').addEventListener('keydown', function(e){
 });
 
 document.addEventListener('click', function(e){
+  if (e.target.id === 'fixStray'){
+    var strays = (DATA.days || []).filter(function(r){
+      return TRIP_DAYS.indexOf(normDate(r.date)) === -1;
+    });
+    if (!strays.length) return;
+    if (!confirm('把這 ' + strays.length + ' 筆行程的日期改成 ' + dateLabel(activeDay) + '？')) return;
+    strays.forEach(function(r){ r.date = activeDay; });
+    strays.forEach(function(r){ saveRow('days', r); });
+    toast('已搬到 ' + dateLabel(activeDay));
+    return;
+  }
+
   var add = e.target.closest('[data-add]');
   if (add){ openDrawer(add.dataset.add, null); return; }
 
