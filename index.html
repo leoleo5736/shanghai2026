@@ -199,6 +199,13 @@ a{color:inherit}
 }
 .swatch:hover{transform:scale(1.1)}
 .swatch.on{border-color:var(--ink);box-shadow:0 0 0 2px rgba(13,43,44,.18)}
+.emoji-own{
+  margin-top:9px;width:76px;text-align:center;font-size:22px;line-height:1.6;
+}
+.hint{
+  display:block;margin-top:6px;font-size:11px;
+  color:rgba(13,43,44,.5);letter-spacing:.02em;
+}
 
 /* ============================================================
    App 外框
@@ -508,7 +515,7 @@ section.on{display:block}
   <div class="gate-inner">
     <p class="eyebrow">Shanghai · Disneyland</p>
     <h1 class="gate-title">上海迪士尼</h1>
-    <p class="gate-sub">2026 . 11 . 24 &nbsp;—&nbsp; 11 . 28</p>
+    <p class="gate-sub" id="gateRange"></p>
 
     <div class="fan-wrap"><svg class="fan" id="gateFan" viewBox="0 0 300 168" role="img" aria-label="行程五天"></svg></div>
     <p class="countdown" id="countdown">&nbsp;</p>
@@ -618,7 +625,8 @@ section.on{display:block}
 /* ============================================================
    常數
    ============================================================ */
-var TRIP_DAYS = ['2026-11-24','2026-11-25','2026-11-26','2026-11-27','2026-11-28'];
+/* ★ 要改旅遊日期，只改這一行。天數可多可少，扇形會自己調整 */
+var TRIP_DAYS = ['2026-11-26','2026-11-27','2026-11-28','2026-11-29','2026-11-30'];
 var WEEK = ['日','一','二','三','四','五','六'];
 var CACHE_KEY = 'sh-disney-data';
 var ME_KEY = 'sh-disney-me';
@@ -870,7 +878,9 @@ function renderPicker(){
 }
 
 /* 新增／編輯成員：頭像可從這排 emoji 挑，顏色是頭像外圈的顏色 */
-var EMOJI_POOL = ['🐭','🎀','🎈','🏰','🎠','🍬','🧸','🎡','⭐','🦆','🐻','🌈'];
+/* 頭像候選。想換成別的表情符號，直接改這一行就好，
+   數量不限，貼幾個就有幾個可以選 */
+var EMOJI_POOL = ['🐭','🎀','🎈','🏰','🎠','🍬','🧸','🎡','⭐','🦆','🐻','🐖'];
 var COLOR_POOL = ['#E8443A','#F2A5C0','#F2B705','#3E7CB1','#79BFA8','#B98A2E','#C43D2E','#7FB069'];
 
 function openMemberDialog(id){
@@ -897,7 +907,8 @@ function openMemberDialog(id){
         return '<button type="button" class="chip' + (e === row.emoji ? ' on' : '') +
                '" data-emoji="' + e + '">' + e + '</button>';
       }).join('') +
-    '</div><input type="hidden" data-k="emoji" value="' + esc(row.emoji) + '"></div>' +
+    '</div><input class="emoji-own" type="text" data-k="emoji" value="' + esc(row.emoji) +
+      '" maxlength="4" aria-label="自訂頭像"><span class="hint">上面挑一個，或直接在這格貼上你想要的表情符號</span></div>' +
     '<div class="field"><label>顏色</label><div class="chips" id="colorPick">' +
       COLOR_POOL.map(function(c){
         return '<button type="button" class="swatch' + (c === row.color ? ' on' : '') +
@@ -905,12 +916,20 @@ function openMemberDialog(id){
       }).join('') +
     '</div><input type="hidden" data-k="color" value="' + esc(row.color) + '"></div>';
 
+  var emojiInput = $('#drawerBody').querySelector('[data-k="emoji"]');
   $('#emojiPick').addEventListener('click', function(e){
     var b = e.target.closest('[data-emoji]');
     if (!b) return;
     Array.prototype.forEach.call(this.children, function(x){ x.classList.remove('on'); });
     b.classList.add('on');
-    $('#drawerBody').querySelector('[data-k="emoji"]').value = b.dataset.emoji;
+    emojiInput.value = b.dataset.emoji;
+  });
+  // 自己打字時，取消上面那排的選取狀態
+  emojiInput.addEventListener('input', function(){
+    var v = this.value;
+    Array.prototype.forEach.call($('#emojiPick').children, function(x){
+      x.classList.toggle('on', x.dataset.emoji === v);
+    });
   });
   $('#colorPick').addEventListener('click', function(e){
     var b = e.target.closest('[data-color]');
@@ -927,7 +946,7 @@ function openMemberDialog(id){
 function renderDays(){
   drawFan($('#dayFan'), { interactive:true });
   var idx = TRIP_DAYS.indexOf(activeDay);
-  $('#dayLabel').textContent = 'DAY ' + (idx + 1) + ' / 5';
+  $('#dayLabel').textContent = 'DAY ' + (idx + 1) + ' / ' + TRIP_DAYS.length;
   $('#dayTitle').textContent = dateLabel(activeDay);
 
   var rows = (DATA.days || [])
@@ -1284,6 +1303,12 @@ window.addEventListener('offline', function(){ status('off','離線 — 顯示�
    啟動
    ============================================================ */
 (function init(){
+  // 標題的日期範圍直接從 TRIP_DAYS 算，改上面那一行就會跟著變
+  var a = TRIP_DAYS[0].split('-'), b = TRIP_DAYS[TRIP_DAYS.length - 1].split('-');
+  $('#gateRange').innerHTML = a[0] + ' . ' + a[1] + ' . ' + a[2] +
+    ' &nbsp;—&nbsp; ' + b[1] + ' . ' + b[2];
+  document.title = '上海迪士尼 ' + a[1] + '/' + a[2] + '–' + b[1] + '/' + b[2];
+
   var d = daysToGo();
   $('#countdown').innerHTML = d > 0
     ? '距離出發還有 <b>' + d + '</b> 天'
