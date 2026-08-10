@@ -166,12 +166,12 @@ a{color:inherit}
   margin-top:34px;font-size:11px;letter-spacing:.1em;
   color:rgba(233,235,227,.35);
 }
-#manageBtn{
+#manageBtn,#tripBtn{
   background:none;border:none;padding:0;cursor:pointer;
-  font:inherit;letter-spacing:.1em;
+  font:inherit;letter-spacing:.1em;margin-top:7px;
   color:rgba(217,183,92,.72);border-bottom:1px solid rgba(217,183,92,.34);
 }
-#manageBtn:hover{color:var(--brass-lite)}
+#manageBtn:hover,#tripBtn:hover{color:var(--brass-lite)}
 .avatar.add{
   font-size:26px;color:rgba(217,183,92,.6);
   border-style:dashed;border-color:rgba(217,183,92,.3);
@@ -526,7 +526,7 @@ section.on{display:block}
 <div id="gate">
   <div class="gate-inner">
     <p class="eyebrow">Shanghai · Disneyland</p>
-    <h1 class="gate-title">上海迪士尼</h1>
+    <h1 class="gate-title" id="gateTitle">上海迪士尼</h1>
     <p class="gate-sub" id="gateRange"></p>
 
     <div class="fan-wrap"><svg class="fan" id="gateFan" viewBox="0 0 300 168" role="img" aria-label="行程五天"></svg></div>
@@ -535,7 +535,8 @@ section.on{display:block}
     <p class="who">Who's going?</p>
     <div class="picker" id="picker"></div>
 
-    <p class="gate-foot">選一個人進入，之後的修改都會記名字　·　<button type="button" id="manageBtn">管理成員</button></p>
+    <p class="gate-foot">選一個人進入，之後的修改都會記名字<br>
+      <button type="button" id="manageBtn">管理成員</button>　·　<button type="button" id="tripBtn">改行程日期</button></p>
   </div>
 </div>
 
@@ -638,16 +639,50 @@ section.on{display:block}
 /* ============================================================
    常數
    ============================================================ */
-/* ★ 要改旅遊日期，只改這一行。天數可多可少，扇形會自己調整 */
-var TRIP_DAYS = ['2026-11-26','2026-11-27','2026-11-28','2026-11-29','2026-11-30'];
+/* 旅遊日期存在試算表的「設定」分頁，網站上點齒輪就能改。
+   下面只是連不上網時的預設值 */
+var FALLBACK_START = '2026-11-26';
+var FALLBACK_END   = '2026-11-30';
+var TRIP_TITLE = '上海迪士尼';
+var TRIP_DAYS = [];
+
+/* 由起訖日期展開成每一天 */
+function buildTripDays(start, end){
+  var a = normDate(start), b = normDate(end);
+  if (!a || !b) return [];
+  var d0 = new Date(a + 'T00:00:00'), d1 = new Date(b + 'T00:00:00');
+  if (isNaN(d0) || isNaN(d1) || d1 < d0) return [a];
+  var out = [], cur = new Date(d0), guard = 0;
+  while (cur <= d1 && guard++ < 60){
+    out.push(cur.getFullYear() + '-' +
+      String(cur.getMonth() + 1).padStart(2,'0') + '-' +
+      String(cur.getDate()).padStart(2,'0'));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+/* 從「設定」分頁讀值 */
+function conf(key, dflt){
+  var hit = (DATA.settings || []).filter(function(r){ return String(r.key) === key; })[0];
+  return (hit && String(hit.value).trim()) || dflt;
+}
+
+/* 每次資料更新後重算行程天數 */
+function refreshTripDays(){
+  TRIP_DAYS = buildTripDays(conf('startDate', FALLBACK_START), conf('endDate', FALLBACK_END));
+  if (!TRIP_DAYS.length) TRIP_DAYS = buildTripDays(FALLBACK_START, FALLBACK_END);
+  TRIP_TITLE = conf('tripTitle', '上海迪士尼');
+  if (TRIP_DAYS.indexOf(activeDay) === -1) activeDay = TRIP_DAYS[0];
+}
 var WEEK = ['日','一','二','三','四','五','六'];
 var CACHE_KEY = 'sh-disney-data';
 var ME_KEY = 'sh-disney-me';
 var QUEUE_KEY = 'sh-disney-queue';
 
-var DATA = { members:[], days:[], hotels:[], flights:[], todos:[] };
+var DATA = { settings:[], members:[], days:[], hotels:[], flights:[], todos:[] };
 var ME = null;
-var activeDay = TRIP_DAYS[0];
+var activeDay = '';
 var activeTab = 'days';
 var editing = null;   // { sheet, row, isNew }
 
@@ -692,7 +727,10 @@ function dateLabel(iso){
 }
 function daysToGo(){
   var t = new Date(); t.setHours(0,0,0,0);
-  var g = new Date(2026,10,24);
+  var first = TRIP_DAYS[0];
+  if (!first) return 0;
+  var p = first.split('-');
+  var g = new Date(+p[0], +p[1] - 1, +p[2]);
   return Math.round((g - t) / 86400000);
 }
 var toastTimer;
@@ -714,12 +752,16 @@ function status(kind, text){
 function drawFan(svg, opts){
   opts = opts || {};
   var cx = 150, cy = 156, R = 132, r = 52, span = 168, start = 180 + (180 - span) / 2;
-  var step = span / TRIP_DAYS.length;
+  var nd = TRIP_DAYS.length || 1;
+  var step = span / nd;
+  // 天數多的時候縮小縫隙與字級，扇形才不會擠成一團
+  var gap = nd > 12 ? 0.35 : (nd > 8 ? 0.8 : 1.4);
+  var fs  = nd > 14 ? 7 : (nd > 10 ? 8.5 : (nd > 7 ? 10 : 12));
   var out = '';
 
-  for (var i = 0; i < TRIP_DAYS.length; i++){
-    var a0 = start + step * i + 1.4;
-    var a1 = start + step * (i + 1) - 1.4;
+  for (var i = 0; i < nd; i++){
+    var a0 = start + step * i + gap;
+    var a1 = start + step * (i + 1) - gap;
     var am = (a0 + a1) / 2;
     var on = opts.interactive && TRIP_DAYS[i] === activeDay;
     var p = function(ang, rad){
@@ -736,10 +778,17 @@ function drawFan(svg, opts){
     out += '<path class="ray' + (on ? ' on' : '') + '" d="' + d + '"' +
            (opts.interactive ? ' data-day="' + TRIP_DAYS[i] + '" role="button" tabindex="0"' +
              ' aria-label="' + dateLabel(TRIP_DAYS[i]) + '"' : '') + '/>' +
-           '<text class="raytxt" x="' + tp[0] + '" y="' + tp[1] + '" pointer-events="none">' + day + '</text>';
+           '<text class="raytxt" x="' + tp[0] + '" y="' + tp[1] + '"' +
+             ' style="font-size:' + fs + 'px" pointer-events="none">' + day + '</text>';
   }
   out += '<circle class="hub" cx="' + cx + '" cy="' + cy + '" r="' + (r - 9) + '"/>';
-  out += '<text class="raytxt" x="' + cx + '" y="' + (cy - 20) + '" style="font-size:9px;letter-spacing:.2em">NOV</text>';
+  // 中間顯示月份；跨月就顯示兩個月份
+  var MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  var m0 = MON[+TRIP_DAYS[0].slice(5,7) - 1] || '';
+  var m1 = MON[+TRIP_DAYS[nd - 1].slice(5,7) - 1] || '';
+  var mlabel = (m0 === m1) ? m0 : (m0 + '–' + m1);
+  out += '<text class="raytxt" x="' + cx + '" y="' + (cy - 20) + '"' +
+         ' style="font-size:9px;letter-spacing:.2em">' + mlabel + '</text>';
   svg.innerHTML = out;
 }
 
@@ -884,6 +933,9 @@ function deleteRow(sheet, id){
    繪製
    ============================================================ */
 function renderAll(){
+  refreshTripDays();
+  renderHeadline();
+  drawFan($('#gateFan'), { interactive:false });   // 天數變了要重畫
   renderPicker();
   renderDays();
   renderHotels();
@@ -894,6 +946,20 @@ function renderAll(){
   $('#cFlights').textContent = (DATA.flights || []).length || '';
   var open = (DATA.todos || []).filter(function(t){ return String(t.status || '') !== '已確認'; }).length;
   $('#cTodos').textContent = open || '';
+}
+
+/* 標題、日期範圍、倒數，全部從「設定」算出來 */
+function renderHeadline(){
+  var a = TRIP_DAYS[0].split('-'), b = TRIP_DAYS[TRIP_DAYS.length - 1].split('-');
+  $('#gateRange').innerHTML = a[0] + ' . ' + a[1] + ' . ' + a[2] +
+    ' &nbsp;—&nbsp; ' + b[1] + ' . ' + b[2];
+  $('#gateTitle').textContent = TRIP_TITLE;
+  document.title = TRIP_TITLE + ' ' + (+a[1]) + '/' + (+a[2]) + '–' + (+b[1]) + '/' + (+b[2]);
+
+  var d = daysToGo();
+  $('#countdown').innerHTML = d > 0
+    ? '距離出發還有 <b>' + d + '</b> 天'
+    : (d === 0 ? '<b>今天出發</b>' : '旅程已結束');
 }
 
 function renderPicker(){
@@ -918,6 +984,48 @@ function renderPicker(){
    數量不限，貼幾個就有幾個可以選 */
 var EMOJI_POOL = ['🐭','🎀','🎈','🏰','🎠','🍬','🧸','🎡','⭐','🦆','🐻','🐖'];
 var COLOR_POOL = ['#E8443A','#F2A5C0','#F2B705','#3E7CB1','#79BFA8','#B98A2E','#C43D2E','#7FB069'];
+
+/* 行程設定：改標題與起訖日期。天數由起訖日期自動算出來 */
+function openTripDialog(){
+  var start = conf('startDate', FALLBACK_START);
+  var end   = conf('endDate',   FALLBACK_END);
+  editing = { sheet:'settings', row:{}, isNew:false, isTrip:true };
+
+  $('#drawerTitle').textContent = '行程設定';
+  $('#deleteBtn').style.display = 'none';
+  $('#drawerBody').innerHTML =
+    '<div class="field"><label>行程名稱</label>' +
+      '<input type="text" id="tTitle" value="' + esc(TRIP_TITLE) + '" maxlength="12"></div>' +
+    '<div class="field"><label>出發日</label>' +
+      '<input type="date" id="tStart" value="' + esc(start) + '"></div>' +
+    '<div class="field"><label>回程日</label>' +
+      '<input type="date" id="tEnd" value="' + esc(end) + '"></div>' +
+    '<p class="hint" id="tPreview"></p>' +
+    '<p class="hint">天數會自動算出來，最多 60 天。<br>' +
+      '縮短天數時，落在範圍外的行程不會被刪除，只是暫時看不到；把日期改回去就會再出現。</p>';
+
+  function preview(){
+    var days = buildTripDays($('#tStart').value, $('#tEnd').value);
+    $('#tPreview').innerHTML = days.length
+      ? '共 <b>' + days.length + '</b> 天：' + esc(dateLabel(days[0])) +
+        ' ～ ' + esc(dateLabel(days[days.length - 1]))
+      : '<span style="color:var(--lacquer)">日期不正確，回程日不能早於出發日</span>';
+  }
+  $('#tStart').addEventListener('change', preview);
+  $('#tEnd').addEventListener('change', preview);
+  preview();
+
+  $('#scrim').classList.add('on');
+  $('#drawer').classList.add('on');
+}
+
+/* 寫回「設定」分頁。同一個 key 就更新，沒有就新增 */
+function saveConf(key, value){
+  var hit = (DATA.settings || []).filter(function(r){ return String(r.key) === key; })[0];
+  var row = hit || { key:key };
+  row.value = value;
+  saveRow('settings', row);
+}
 
 function openMemberDialog(id){
   var row = id ? (DATA.members || []).filter(function(r){ return r.id === id; })[0] : null;
@@ -1324,8 +1432,26 @@ document.addEventListener('click', function(e){
   }
 });
 
+$('#tripBtn').addEventListener('click', openTripDialog);
+
 $('#saveBtn').addEventListener('click', function(){
   if (!editing) return;
+
+  // 行程設定走自己的儲存流程
+  if (editing.isTrip){
+    var s = normDate($('#tStart').value), e2 = normDate($('#tEnd').value);
+    var days = buildTripDays(s, e2);
+    if (!days.length){ toast('日期不正確'); return; }
+    if (days.length > 60){ toast('最多 60 天'); return; }
+    var t = String($('#tTitle').value || '').trim() || '我的行程';
+    saveConf('startDate', s);
+    saveConf('endDate', e2);
+    saveConf('tripTitle', t);
+    closeDrawer();
+    toast('行程改成 ' + days.length + ' 天');
+    return;
+  }
+
   var row = editing.row;
   Array.prototype.forEach.call($('#drawerBody').querySelectorAll('[data-k]'), function(el){
     row[el.dataset.k] = el.value;
@@ -1369,19 +1495,16 @@ window.addEventListener('offline', function(){ status('off','離線 — 顯示�
    啟動
    ============================================================ */
 (function init(){
-  // 標題的日期範圍直接從 TRIP_DAYS 算，改上面那一行就會跟著變
-  var a = TRIP_DAYS[0].split('-'), b = TRIP_DAYS[TRIP_DAYS.length - 1].split('-');
-  $('#gateRange').innerHTML = a[0] + ' . ' + a[1] + ' . ' + a[2] +
-    ' &nbsp;—&nbsp; ' + b[1] + ' . ' + b[2];
-  document.title = '上海迪士尼 ' + a[1] + '/' + a[2] + '–' + b[1] + '/' + b[2];
-
-  var d = daysToGo();
-  $('#countdown').innerHTML = d > 0
-    ? '距離出發還有 <b>' + d + '</b> 天'
-    : (d === 0 ? '<b>今天出發</b>' : '旅程已結束');
-
-  drawFan($('#gateFan'), { interactive:false });
   loadCache();
+  refreshTripDays();
+
+  // 今天若在行程期間內，預設打開今天
+  var today = new Date();
+  var iso = today.getFullYear() + '-' +
+            String(today.getMonth() + 1).padStart(2,'0') + '-' +
+            String(today.getDate()).padStart(2,'0');
+  if (TRIP_DAYS.indexOf(iso) > -1) activeDay = iso;
+
   renderAll();
 
   // 記住上次是誰
@@ -1391,13 +1514,6 @@ window.addEventListener('offline', function(){ status('off','離線 — 顯示�
     var m = (DATA.members || []).filter(function(x){ return x.id === savedId; })[0];
     if (m) setMe(m);
   }
-
-  // 今天若在行程期間內，預設打開今天
-  var today = new Date();
-  var iso = today.getFullYear() + '-' +
-            String(today.getMonth() + 1).padStart(2,'0') + '-' +
-            String(today.getDate()).padStart(2,'0');
-  if (TRIP_DAYS.indexOf(iso) > -1) activeDay = iso;
 
   pull(false);
 
