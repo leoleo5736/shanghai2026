@@ -15,7 +15,7 @@
  * 改版時把 VERSION 加一，舊快取會自動清掉。
  */
 
-var VERSION = 'v5';
+var VERSION = 'v6';
 var CACHE = 'sh-disney-' + VERSION;
 
 /* 網站外殼：這幾個檔案存下來，離線就能開 */
