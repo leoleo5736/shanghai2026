@@ -428,6 +428,8 @@ section.on{display:block}
 .dot.ok{background:var(--mint)}
 .dot.off{background:var(--brass)}
 .dot.err{background:var(--lacquer)}
+.dot.sync{background:var(--brass-lite);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .statusbar button{
   font-family:var(--deco);font-size:10px;letter-spacing:.16em;
   color:var(--brass-lite);border:1px solid rgba(217,183,92,.4);
@@ -495,14 +497,6 @@ section.on{display:block}
   text-align:center;padding:38px 20px;color:rgba(13,43,44,.42);
   font-size:13.5px;letter-spacing:.05em;
 }
-
-.notice{
-  background:rgba(185,138,46,.1);
-  border:1px solid rgba(185,138,46,.32);
-  border-radius:var(--r);padding:13px 15px;margin-bottom:16px;
-  font-size:13px;line-height:1.7;color:#7A5810;
-}
-.notice b{display:block;font-family:var(--deco);font-size:10px;letter-spacing:.22em;margin-bottom:4px}
 
 @media(min-width:680px){
   :root{--pad:32px}
@@ -605,10 +599,6 @@ section.on{display:block}
     <section id="s-todos">
       <div class="sechead">
         <div><h2>待確認事項</h2><p>出發前要處理完的事</p></div>
-      </div>
-      <div class="notice">
-        <b>Heads up</b>
-        中國境內連不上 Google，這個網站的即時同步在上海會失效。出發前先在手機上把整個網站打開一次，行程就會存進離線快取，到上海還看得到（但改不了）。用台灣門號漫遊則不受影響。
       </div>
       <div id="todoList"></div>
       <button class="addrow" data-add="todos">＋ 加一件待辦</button>
@@ -852,6 +842,8 @@ function pull(silent){
   });
 }
 
+var pending = 0;   // 還在路上的請求數
+
 function push(payload, done){
   var q = getQueue();
   if (!API_URL){
@@ -860,21 +852,34 @@ function push(payload, done){
     done && done(false);
     return;
   }
+
+  // 畫面早就更新過了，所以請伺服器不要再把整份資料回傳一次
+  payload.light = true;
+
+  pending++;
+  status('sync', '儲存中…');
+
   fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload)
   }).then(function(r){ return r.json(); })
     .then(function(res){
-      if (res && res.ok && res.data){
-        DATA = res.data; saveCache(); renderAll();
-        status('ok', '已同步 ' + new Date().toTimeString().slice(0,5));
+      if (res && res.ok){
+        pending--;
+        // 只有等所有請求都回來了才顯示完成，避免連續編輯時狀態亂跳
+        if (pending <= 0){
+          pending = 0;
+          status('ok', '已儲存 ' + new Date().toTimeString().slice(0,5));
+        }
         done && done(true);
       } else {
         throw new Error(res && res.error ? res.error : '未知錯誤');
       }
     })
     .catch(function(){
+      pending--;
+      if (pending < 0) pending = 0;
       var qq = getQueue(); qq.push(payload); setQueue(qq);
       status('off', '離線 — 已排隊 ' + qq.length + ' 筆待送出');
       done && done(false);
@@ -896,6 +901,7 @@ function flushQueue(){
     }).then(function(r){ return r.json(); })
       .then(function(res){
         if (res && res.ok && res.data){ DATA = res.data; saveCache(); renderAll(); }
+        else if (res && res.ok){ /* light 模式沒有回傳資料，畫面已是最新 */ }
         next();
       })
       .catch(function(){
@@ -918,15 +924,27 @@ function saveRow(sheet, row){
   }
   if (!hit) list.push(row);
   saveCache();
-  renderAll();
+  renderSheet(sheet);
   push({ action:'save', sheet:sheet, rows:[row], actor: ME ? ME.name : '' });
 }
 
 function deleteRow(sheet, id){
   DATA[sheet] = (DATA[sheet] || []).filter(function(r){ return r.id !== id; });
   saveCache();
-  renderAll();
+  renderSheet(sheet);
   push({ action:'delete', sheet:sheet, ids:[id] });
+}
+
+/* 只重畫被改動的那一區，畫面反應才會即時。
+   改設定會影響整體，才需要整頁重畫 */
+function renderSheet(sheet){
+  if (sheet === 'settings'){ renderAll(); return; }
+  if (sheet === 'days')    renderDays();
+  if (sheet === 'hotels')  renderHotels();
+  if (sheet === 'flights') renderFlights();
+  if (sheet === 'todos')   renderTodos();
+  if (sheet === 'members') renderPicker();
+  renderCounts();
 }
 
 /* ============================================================
@@ -941,6 +959,10 @@ function renderAll(){
   renderHotels();
   renderFlights();
   renderTodos();
+  renderCounts();
+}
+
+function renderCounts(){
   renderBudget();
   $('#cHotels').textContent = (DATA.hotels || []).length || '';
   $('#cFlights').textContent = (DATA.flights || []).length || '';
@@ -1019,12 +1041,18 @@ function openTripDialog(){
   $('#drawer').classList.add('on');
 }
 
-/* 寫回「設定」分頁。同一個 key 就更新，沒有就新增 */
-function saveConf(key, value){
-  var hit = (DATA.settings || []).filter(function(r){ return String(r.key) === key; })[0];
-  var row = hit || { key:key };
-  row.value = value;
-  saveRow('settings', row);
+/* 準備一列「設定」資料。同一個 key 就更新，沒有就新增 */
+function confRow(key, value){
+  var list = DATA.settings || (DATA.settings = []);
+  var hit = list.filter(function(r){ return String(r.key) === key; })[0];
+  if (!hit){
+    hit = { id:'local-' + Date.now() + '-' + Math.random().toString(36).slice(2,7), key:key };
+    list.push(hit);
+  }
+  hit.value = value;
+  hit.updatedBy = ME ? ME.name : '';
+  hit.updatedAt = new Date().toISOString().slice(0,19);
+  return hit;
 }
 
 function openMemberDialog(id){
@@ -1384,8 +1412,16 @@ document.addEventListener('click', function(e){
     });
     if (!strays.length) return;
     if (!confirm('把這 ' + strays.length + ' 筆行程的日期改成 ' + dateLabel(activeDay) + '？')) return;
-    strays.forEach(function(r){ r.date = activeDay; });
-    strays.forEach(function(r){ saveRow('days', r); });
+    // 一次送出，不要一筆一筆打
+    var stamp = new Date().toISOString().slice(0,19);
+    strays.forEach(function(r){
+      r.date = activeDay;
+      r.updatedBy = ME ? ME.name : '';
+      r.updatedAt = stamp;
+    });
+    saveCache();
+    renderSheet('days');
+    push({ action:'save', sheet:'days', rows:strays, actor: ME ? ME.name : '' });
     toast('已搬到 ' + dateLabel(activeDay));
     return;
   }
@@ -1444,9 +1480,15 @@ $('#saveBtn').addEventListener('click', function(){
     if (!days.length){ toast('日期不正確'); return; }
     if (days.length > 60){ toast('最多 60 天'); return; }
     var t = String($('#tTitle').value || '').trim() || '我的行程';
-    saveConf('startDate', s);
-    saveConf('endDate', e2);
-    saveConf('tripTitle', t);
+    // 三個設定一次送出
+    var rows = [
+      confRow('startDate', s),
+      confRow('endDate', e2),
+      confRow('tripTitle', t)
+    ];
+    saveCache();
+    renderAll();
+    push({ action:'save', sheet:'settings', rows:rows, actor: ME ? ME.name : '' });
     closeDrawer();
     toast('行程改成 ' + days.length + ' 天');
     return;
